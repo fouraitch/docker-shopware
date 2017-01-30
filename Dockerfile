@@ -43,7 +43,7 @@ COPY files/00-ioncube.ini /etc/php/7.0/cli/conf.d/00-ioncube.ini
 COPY files/disable-advanced-usage.php /etc/phpmyadmin/conf.d/disable-advanced-usage.php
 RUN ln -s /etc/phpmyadmin/apache.conf /etc/apache2/conf-enabled/phpmyadmin.conf
 
-VOLUME ["/var/www/html"]
+#VOLUME ["/var/www/html"]
 
 COPY files/entrypoint.sh /entrypoint.sh
 
