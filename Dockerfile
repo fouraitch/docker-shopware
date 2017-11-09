@@ -1,52 +1,45 @@
-FROM ubuntu:xenial
+FROM php:5.6-apache
 
-MAINTAINER Kurt Huwig
+ENV TERM xterm-256color
 
-RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    apache2 \
-    apache2-utils \
-    php-apcu \
-    php-cli \
-    php-curl \
-    php-gd \
-    php-mcrypt \
-    php-zip \
-    phpmyadmin \
-    unzip \
-    bzip2 \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+RUN echo 'Default index.html from docker image' > /var/www/html/index.html
 
-# Configure Apache
-COPY files/apache-shopware.conf /etc/apache2/sites-available/000-default.conf
-RUN a2enmod rewrite \
-    && sed --in-place "s/^upload_max_filesize.*$/upload_max_filesize = 10M/" /etc/php/7.0/apache2/php.ini \
-    && sed --in-place "s/^memory_limit.*$/memory_limit = 256M/" /etc/php/7.0/apache2/php.ini \
-    && phpenmod mcrypt
+RUN a2enmod rewrite
 
-# Install Shopware
-# COPY files/install_5.1.6_04ec396ac8d2fa8c1e088bc2bd2c8132ab56c270.zip /tmp/shopware.zip
-ADD http://releases.s3.shopware.com.s3.amazonaws.com/install_5.2.4_b1a52d04c9c8cd60205c181eb7d51aa5a516bff0.zip /tmp/shopware.zip
+# general php setup
+COPY files/php.ini /usr/local/etc/php/conf.d/php.ini
 
-# Install ioncube
-# COPY files/ioncube_loaders_lin_x86-64.tar.bz2 /tmp/ioncube_loaders_lin_x86-64.tar.bz2
-ADD https://www.ioncube.com/php7-linux-x86-64-beta8.tgz /tmp/
-RUN tar xvzfC /tmp/php7-linux-x86-64-beta8.tgz /tmp/ \
-    && rm /tmp/php7-linux-x86-64-beta8.tgz \
+# install ioncube
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
+    && wget http://downloads3.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz \
+    && mv ioncube_loaders_lin_x86-64.tar.gz /tmp/ && tar xvzfC /tmp/ioncube_loaders_lin_x86-64.tar.gz /tmp/ \
+    && rm /tmp/ioncube_loaders_lin_x86-64.tar.gz \
     && mkdir -p /usr/local/ioncube \
-    && cp /tmp/ioncube_loader_lin_x86-64_7.0b8.so /usr/local/ioncube \
+    && cp /tmp/ioncube/ioncube_loader_lin_5.6.so /usr/local/ioncube \
     && rm -rf /tmp/ioncube
-COPY files/00-ioncube.ini /etc/php/7.0/apache2/conf.d/00-ioncube.ini
-COPY files/00-ioncube.ini /etc/php/7.0/cli/conf.d/00-ioncube.ini
+COPY files/00-ioncube.ini /usr/local/etc/php/conf.d/00-ioncube.ini
 
-# Configure phpMyAdmin
-COPY files/disable-advanced-usage.php /etc/phpmyadmin/conf.d/disable-advanced-usage.php
-RUN ln -s /etc/phpmyadmin/apache.conf /etc/apache2/conf-enabled/phpmyadmin.conf
+# install acpu
+RUN pecl install apcu-4.0.11 \
+    && echo extension=apcu.so > /usr/local/etc/php/conf.d/10-apcu.ini
 
-#VOLUME ["/var/www/html"]
+# install zendopcache
+RUN docker-php-ext-enable opcache.so
 
-COPY files/entrypoint.sh /entrypoint.sh
+# mysql driver
+RUN docker-php-ext-install pdo_mysql
 
-ENTRYPOINT ["/entrypoint.sh"]
+# to be capatible with production
+RUN ln -s /usr/local/bin/php /usr/local/bin/php_cli
 
-EXPOSE 80
+# install composer
+RUN apt-get update && apt-get install -y zlib1g-dev libpng-dev && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+RUN docker-php-ext-install zip gd
+RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+#php -r "if (hash_file('SHA384', 'composer-setup.php') === '669656bab3166a7aff8a7506b8cb2d1c292f042046c5a994c43155c0be6190fa0355160742ab2e1c88d40d5be660b410') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;"
+RUN php composer-setup.php && php -r "unlink('composer-setup.php');" && mv composer.phar /usr/local/bin/composer
+
+# enable mod proxy to forward requests to tgm
+RUN a2enmod proxy proxy_http proxy_balancer ssl
+
+RUN chown -R www-data /var/www/html
